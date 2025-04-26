@@ -8,14 +8,6 @@ const app = express();
 // Enable JSON parsing
 app.use(express.json());
 
-// Hello World function
-const helloWorld = () => {
-  console.log("Hello World");
-  return "Hello World";
-};
-
-// Example DynamoDB endpoints
-
 // Create/Update item
 app.post('/api/items', async (req, res) => {
   try {
@@ -92,24 +84,6 @@ app.get('/api/items', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get items',
-      message: error.message
-    });
-  }
-});
-
-// API endpoint that uses the helloWorld function
-app.get('/api/hello', (req, res) => {
-  try {
-    const message = helloWorld();
-    res.status(200).json({ 
-      success: true,
-      message,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Internal Server Error',
       message: error.message
     });
   }
