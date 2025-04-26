@@ -40,13 +40,13 @@ app.post('/api/items', async (req, res) => {
   }
 });
 
-// Get item by ID
-app.get('/api/items/:id', async (req, res) => {
+// Get item by Documentid
+app.get('/api/items/:documentId', async (req, res) => {
   try {
     const command = new GetCommand({
       TableName: process.env.DYNAMODB_TABLE_NAME,
       Key: {
-        id: req.params.id
+        Documentid: req.params.documentId
       }
     });
 
@@ -56,7 +56,7 @@ app.get('/api/items/:id', async (req, res) => {
       return res.status(404).json({
         success: false,
         error: 'Not Found',
-        message: 'Item not found'
+        message: 'Document not found'
       });
     }
 
@@ -65,10 +65,10 @@ app.get('/api/items/:id', async (req, res) => {
       item: response.Item
     });
   } catch (error) {
-    console.error('Error getting item:', error);
+    console.error('Error getting document:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to get item',
+      error: 'Failed to get document',
       message: error.message
     });
   }
