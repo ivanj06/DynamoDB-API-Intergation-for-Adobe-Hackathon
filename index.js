@@ -8,8 +8,8 @@ const app = express();
 // Enable JSON parsing
 app.use(express.json());
 
-// Create/Update item
-app.post('/api/items', async (req, res) => {
+// Create/Update document
+app.post('/api/documents', async (req, res) => {
   try {
     const command = new PutCommand({
       TableName: process.env.DYNAMODB_TABLE_NAME,
@@ -19,21 +19,21 @@ app.post('/api/items', async (req, res) => {
     await docClient.send(command);
     res.status(201).json({
       success: true,
-      message: 'Item created successfully',
-      item: req.body
+      message: 'Document created successfully',
+      document: req.body
     });
   } catch (error) {
-    console.error('Error creating item:', error);
+    console.error('Error creating document:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to create item',
+      error: 'Failed to create document',
       message: error.message
     });
   }
 });
 
-// Get item by Documentid
-app.get('/api/items/:documentId', async (req, res) => {
+// Get document by Documentid
+app.get('/api/documents/:documentId', async (req, res) => {
   try {
     const command = new GetCommand({
       TableName: process.env.DYNAMODB_TABLE_NAME,
@@ -54,7 +54,7 @@ app.get('/api/items/:documentId', async (req, res) => {
 
     res.json({
       success: true,
-      item: response.Item
+      document: response.Item
     });
   } catch (error) {
     console.error('Error getting document:', error);
@@ -66,8 +66,8 @@ app.get('/api/items/:documentId', async (req, res) => {
   }
 });
 
-// Get all items
-app.get('/api/items', async (req, res) => {
+// Get all documents
+app.get('/api/documents', async (req, res) => {
   try {
     const command = new ScanCommand({
       TableName: process.env.DYNAMODB_TABLE_NAME
@@ -77,13 +77,13 @@ app.get('/api/items', async (req, res) => {
     
     res.json({
       success: true,
-      items: response.Items
+      documents: response.Items
     });
   } catch (error) {
-    console.error('Error scanning items:', error);
+    console.error('Error scanning documents:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to get items',
+      error: 'Failed to get documents',
       message: error.message
     });
   }
