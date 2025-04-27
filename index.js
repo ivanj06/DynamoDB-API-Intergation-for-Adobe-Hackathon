@@ -526,7 +526,7 @@ app.get('/api/:documentId/:timestamp/images', async (req, res) => {
   }
 });
 
-// Delete a version from DynamoDB (but keep S3 files)
+// Delete a version from DynamoDB 
 app.delete('/api/:documentId/versions/:timestamp', async (req, res) => {
   try {
     const { documentId, timestamp } = req.params;
