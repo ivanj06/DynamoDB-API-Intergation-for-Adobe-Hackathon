@@ -4,7 +4,6 @@ const cors = require('cors');
 const { docClient, s3Client } = require('./config/dynamodb');
 const { PutCommand, GetCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
 const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
-const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const app = express();
 
@@ -333,12 +332,12 @@ app.post('/api/:documentId/versions', async (req, res) => {
   }
 });
 
-// Get pre-signed URL for file upload
-app.get('/api/:documentId/versions/:timestamp/upload-url', async (req, res) => {
+// Upload file to S3
+app.post('/api/:documentId/versions/:timestamp/upload', express.raw({ type: ['application/pdf', 'image/jpeg'], limit: '100mb' }), async (req, res) => {
   try {
     const { documentId, timestamp } = req.params;
     const { fileType, fileName } = req.query;
-    
+
     if (!fileType || !fileName) {
       return res.status(400).json({
         success: false,
@@ -351,21 +350,22 @@ app.get('/api/:documentId/versions/:timestamp/upload-url', async (req, res) => {
     const command = new PutObjectCommand({
       Bucket: process.env.S3_BUCKET_NAME,
       Key: key,
-      ContentType: fileType === 'pdf' ? 'application/pdf' : 'image/jpeg'
+      Body: req.body,
+      ContentType: req.headers['content-type']
     });
 
-    const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+    await s3Client.send(command);
 
     res.json({
       success: true,
-      uploadUrl: url,
+      message: "File uploaded successfully",
       key: key
     });
   } catch (error) {
-    console.error('Error generating upload URL:', error);
+    console.error('Error uploading file:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to generate upload URL',
+      error: 'Failed to upload file',
       message: error.message
     });
   }
