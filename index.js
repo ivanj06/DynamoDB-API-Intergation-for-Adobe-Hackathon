@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { docClient, s3Client } = require('./config/dynamodb');
 const { PutCommand, GetCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
-const { PutObjectCommand, GetObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
+const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 
 const app = express();
 
@@ -409,7 +409,7 @@ app.get('/api/:documentId/versions/:timestamp/download', async (req, res) => {
   }
 });
 
-// Delete a version from DynamoDB
+// Delete a version from DynamoDB (but keep S3 files)
 app.delete('/api/:documentId/versions/:timestamp', async (req, res) => {
   try {
     const { documentId, timestamp } = req.params;
