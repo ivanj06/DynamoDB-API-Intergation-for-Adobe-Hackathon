@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { docClient, s3Client } = require('./config/dynamodb');
 const { PutCommand, GetCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
-const { PutObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } = require('@aws-sdk/client-s3');
+const { PutObjectCommand, GetObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
 
 const app = express();
 
@@ -409,92 +409,45 @@ app.get('/api/:documentId/versions/:timestamp/download', async (req, res) => {
   }
 });
 
-// Delete all files for a document version and remove the version from DynamoDB
+// Delete a version and its files
 app.delete('/api/:documentId/versions/:timestamp', async (req, res) => {
   try {
     const { documentId, timestamp } = req.params;
-    
-    // First, get the current document to update its versions
-    const getCommand = new GetCommand({
-      TableName: process.env.DYNAMODB_TABLE_NAME,
-      Key: {
-        Documentid: documentId
-      }
+
+    // First, list all objects in the version directory
+    const listCommand = new ListObjectsV2Command({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Prefix: `${documentId}/${timestamp}/`
     });
 
-    const existingDoc = await docClient.send(getCommand);
+    const listResponse = await s3Client.send(listCommand);
     
-    if (!existingDoc.Item) {
+    if (!listResponse.Contents || listResponse.Contents.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "Document not found"
+        message: "No files found for this version"
       });
     }
 
-    const currentUsers = existingDoc.Item.users || {};
-    const currentVersions = existingDoc.Item.versions || {};
+    // Prepare objects to delete
+    const objectsToDelete = listResponse.Contents.map(obj => ({
+      Key: obj.Key
+    }));
 
-    // Remove the specific version from the versions object
-    const { [timestamp]: removedVersion, ...remainingVersions } = currentVersions;
-
-    // Update the document in DynamoDB
-    const updateCommand = new PutCommand({
-      TableName: process.env.DYNAMODB_TABLE_NAME,
-      Item: {
-        Documentid: documentId,
-        users: currentUsers,
-        versions: remainingVersions
+    // Delete all objects
+    const deleteCommand = new DeleteObjectsCommand({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Delete: {
+        Objects: objectsToDelete
       }
     });
 
-    await docClient.send(updateCommand);
-    
-    // Now delete files from S3
-    const prefixes = [
-      `${documentId}/${timestamp}/pdf/`,
-      `${documentId}/${timestamp}/images/`
-    ];
-
-    let deletedCount = 0;
-    let errorCount = 0;
-
-    // Process each prefix (pdf and images folders)
-    for (const prefix of prefixes) {
-      // List all objects with this prefix
-      const listCommand = new ListObjectsV2Command({
-        Bucket: process.env.S3_BUCKET_NAME,
-        Prefix: prefix
-      });
-
-      const listResponse = await s3Client.send(listCommand);
-      
-      if (listResponse.Contents && listResponse.Contents.length > 0) {
-        // Prepare objects for deletion
-        const objectsToDelete = listResponse.Contents.map(item => ({
-          Key: item.Key
-        }));
-
-        // Delete the objects
-        const deleteCommand = new DeleteObjectsCommand({
-          Bucket: process.env.S3_BUCKET_NAME,
-          Delete: {
-            Objects: objectsToDelete
-          }
-        });
-
-        try {
-          await s3Client.send(deleteCommand);
-          deletedCount += objectsToDelete.length;
-        } catch (error) {
-          console.error(`Error deleting objects with prefix ${prefix}:`, error);
-          errorCount += objectsToDelete.length;
-        }
-      }
-    }
+    await s3Client.send(deleteCommand);
 
     res.json({
       success: true,
-      message: "Version deleted successfully"
+      message: "Version and all associated files deleted successfully",
+      deletedFiles: objectsToDelete.length
     });
   } catch (error) {
     console.error('Error deleting version:', error);
