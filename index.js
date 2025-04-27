@@ -1,8 +1,9 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { docClient } = require('./config/dynamodb');
+const { docClient, s3Client } = require('./config/dynamodb');
 const { PutCommand, GetCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
+const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 
 const app = express();
 
@@ -326,6 +327,83 @@ app.post('/api/:documentId/versions', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to add version',
+      message: error.message
+    });
+  }
+});
+
+// Upload file to S3
+app.post('/api/:documentId/versions/:timestamp/upload', express.raw({ type: ['application/pdf', 'image/jpeg'], limit: '100mb' }), async (req, res) => {
+  try {
+    const { documentId, timestamp } = req.params;
+    const { fileType, fileName } = req.query;
+
+    if (!fileType || !fileName) {
+      return res.status(400).json({
+        success: false,
+        message: "File type and file name are required"
+      });
+    }
+
+    const key = `${documentId}/${timestamp}/${fileType}/${fileName}`;
+    
+    const command = new PutObjectCommand({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Key: key,
+      Body: req.body,
+      ContentType: req.headers['content-type']
+    });
+
+    await s3Client.send(command);
+
+    res.json({
+      success: true,
+      message: "File uploaded successfully",
+      key: key
+    });
+  } catch (error) {
+    console.error('Error uploading file:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to upload file',
+      message: error.message
+    });
+  }
+});
+
+// Download file from S3
+app.get('/api/:documentId/versions/:timestamp/download', async (req, res) => {
+  try {
+    const { documentId, timestamp } = req.params;
+    const { fileType, fileName } = req.query;
+    
+    if (!fileType || !fileName) {
+      return res.status(400).json({
+        success: false,
+        message: "File type and file name are required"
+      });
+    }
+
+    const key = `${documentId}/${timestamp}/${fileType}/${fileName}`;
+    
+    const command = new GetObjectCommand({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Key: key
+    });
+
+    const response = await s3Client.send(command);
+    
+    // Set appropriate headers
+    res.setHeader('Content-Type', response.ContentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    
+    // Stream the file to the response
+    response.Body.pipe(res);
+  } catch (error) {
+    console.error('Error downloading file:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to download file',
       message: error.message
     });
   }
