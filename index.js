@@ -322,11 +322,11 @@ app.post('/api/:documentId/versions', async (req, res) => {
 app.post('/api/:documentId/versions/:timestamp/nodes/:nodeId', async (req, res) => {
   try {
     const { documentId, timestamp, nodeId } = req.params;
-    const { x, y, rotation } = req.body;
-    if (!Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(rotation)) {
+    const { x, y } = req.body;
+    if (!Number.isInteger(x) || !Number.isInteger(y)) {
       return res.status(400).json({
         success: false,
-        message: "x, y, and rotation must be integers"
+        message: "x and y must be integers"
       });
     }
     const getCommand = new GetCommand({
@@ -342,7 +342,7 @@ app.post('/api/:documentId/versions/:timestamp/nodes/:nodeId', async (req, res) 
     }
     const version = doc.Item.versions[timestamp];
     version.nodes = version.nodes || {};
-    version.nodes[nodeId] = { x, y, rotation };
+    version.nodes[nodeId] = { x, y };
     const putCommand = new PutCommand({
       TableName: process.env.DYNAMODB_TABLE_NAME,
       Item: {
@@ -358,7 +358,7 @@ app.post('/api/:documentId/versions/:timestamp/nodes/:nodeId', async (req, res) 
     res.json({
       success: true,
       message: "Node added/updated successfully",
-      node: { x, y, rotation },
+      node: { x, y },
       nodeId
     });
   } catch (error) {
@@ -735,7 +735,7 @@ app.get('/api/:documentId/versions/:timestamp/users/:userId/activity', async (re
   }
 });
 
-// 1. Create a node with a string ID (default x, y, rotation = 0)
+// 1. Create a node with a string ID (default x, y = 0)
 app.post('/api/:documentId/versions/:timestamp/nodes/:nodeId/create', async (req, res) => {
   try {
     const { documentId, timestamp, nodeId } = req.params;
@@ -749,7 +749,7 @@ app.post('/api/:documentId/versions/:timestamp/nodes/:nodeId/create', async (req
     }
     const version = doc.Item.versions[timestamp];
     version.nodes = version.nodes || {};
-    version.nodes[nodeId] = { x: 0, y: 0, rotation: 0 };
+    version.nodes[nodeId] = { x: 0, y: 0 };
     const putCommand = new PutCommand({
       TableName: process.env.DYNAMODB_TABLE_NAME,
       Item: {
@@ -931,6 +931,88 @@ app.post('/api/:documentId/versions/:timestamp/nodes/:nodeId/y', async (req, res
   } catch (error) {
     console.error('Error updating node y:', error);
     res.status(500).json({ success: false, error: 'Failed to update node y', message: error.message });
+  }
+});
+
+// Update width for a node
+app.post('/api/:documentId/versions/:timestamp/nodes/:nodeId/width', async (req, res) => {
+  try {
+    const { documentId, timestamp, nodeId } = req.params;
+    const { width } = req.body;
+    if (!Number.isInteger(width)) {
+      return res.status(400).json({ success: false, message: "width must be an integer" });
+    }
+    const getCommand = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: { Documentid: documentId }
+    });
+    const doc = await docClient.send(getCommand);
+    if (!doc.Item || !doc.Item.versions || !doc.Item.versions[timestamp]) {
+      return res.status(404).json({ success: false, message: "Version not found" });
+    }
+    const version = doc.Item.versions[timestamp];
+    version.nodes = version.nodes || {};
+    if (!version.nodes[nodeId]) {
+      return res.status(404).json({ success: false, message: "Node not found" });
+    }
+    version.nodes[nodeId].width = width;
+    const putCommand = new PutCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Item: {
+        Documentid: documentId,
+        users: doc.Item.users || {},
+        versions: {
+          ...doc.Item.versions,
+          [timestamp]: version
+        }
+      }
+    });
+    await docClient.send(putCommand);
+    res.json({ success: true, message: "Node width updated", nodeId, width });
+  } catch (error) {
+    console.error('Error updating node width:', error);
+    res.status(500).json({ success: false, error: 'Failed to update node width', message: error.message });
+  }
+});
+
+// Update height for a node
+app.post('/api/:documentId/versions/:timestamp/nodes/:nodeId/height', async (req, res) => {
+  try {
+    const { documentId, timestamp, nodeId } = req.params;
+    const { height } = req.body;
+    if (!Number.isInteger(height)) {
+      return res.status(400).json({ success: false, message: "height must be an integer" });
+    }
+    const getCommand = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: { Documentid: documentId }
+    });
+    const doc = await docClient.send(getCommand);
+    if (!doc.Item || !doc.Item.versions || !doc.Item.versions[timestamp]) {
+      return res.status(404).json({ success: false, message: "Version not found" });
+    }
+    const version = doc.Item.versions[timestamp];
+    version.nodes = version.nodes || {};
+    if (!version.nodes[nodeId]) {
+      return res.status(404).json({ success: false, message: "Node not found" });
+    }
+    version.nodes[nodeId].height = height;
+    const putCommand = new PutCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Item: {
+        Documentid: documentId,
+        users: doc.Item.users || {},
+        versions: {
+          ...doc.Item.versions,
+          [timestamp]: version
+        }
+      }
+    });
+    await docClient.send(putCommand);
+    res.json({ success: true, message: "Node height updated", nodeId, height });
+  } catch (error) {
+    console.error('Error updating node height:', error);
+    res.status(500).json({ success: false, error: 'Failed to update node height', message: error.message });
   }
 });
 
