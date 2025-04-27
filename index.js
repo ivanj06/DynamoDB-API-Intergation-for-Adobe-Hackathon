@@ -4,6 +4,7 @@ const cors = require('cors');
 const { docClient, s3Client } = require('./config/dynamodb');
 const { PutCommand, GetCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
 const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { ListObjectsV2Command } = require('@aws-sdk/client-s3');
 
 const app = express();
 
@@ -268,13 +269,13 @@ app.get('/api/:documentId/versions', async (req, res) => {
 // Add a new version to a document
 app.post('/api/:documentId/versions', async (req, res) => {
   try {
-    const { title, username, userid, description } = req.body;
+    const { title, username, userid, description, timestamp } = req.body;
     
     // Validate required fields
-    if (!title || !username || !userid) {
+    if (!title || !username || !userid || !timestamp) {
       return res.status(400).json({
         success: false,
-        message: "Title, username, and userid are required"
+        message: "Title, username, userid, and timestamp are required"
       });
     }
 
@@ -289,9 +290,6 @@ app.post('/api/:documentId/versions', async (req, res) => {
     const existingDoc = await docClient.send(getCommand);
     const currentUsers = existingDoc.Item?.users || {};
     const currentVersions = existingDoc.Item?.versions || {};
-
-    // Generate Unix timestamp for the version key
-    const timestamp = Math.floor(Date.now() / 1000);
 
     // Create new version object
     const newVersion = {
@@ -479,6 +477,143 @@ app.get('/api/health', (req, res) => {
     status: 'healthy',
     timestamp: new Date().toISOString()
   });
+});
+
+// Nested routes for version comparisons
+app.get('/api/:documentId/versions/:timestamp1/compare/:timestamp2', async (req, res) => {
+  try {
+    const { documentId, timestamp1, timestamp2 } = req.params;
+
+    // Get both versions
+    const getCommand1 = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: {
+        Documentid: documentId
+      }
+    });
+
+    const doc = await docClient.send(getCommand1);
+    const version1 = doc.Item?.versions?.[timestamp1];
+    const version2 = doc.Item?.versions?.[timestamp2];
+
+    if (!version1 || !version2) {
+      return res.status(404).json({
+        success: false,
+        message: "One or both versions not found"
+      });
+    }
+
+    // Compare versions
+    const comparison = {
+      version1: {
+        timestamp: timestamp1,
+        ...version1
+      },
+      version2: {
+        timestamp: timestamp2,
+        ...version2
+      },
+      differences: {
+        // Add comparison logic here
+        title: version1.title !== version2.title,
+        description: version1.description !== version2.description,
+        // Add more comparison fields as needed
+      }
+    };
+
+    res.json({
+      success: true,
+      comparison
+    });
+  } catch (error) {
+    console.error('Error comparing versions:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to compare versions',
+      message: error.message
+    });
+  }
+});
+
+// Nested routes for file management
+app.get('/api/:documentId/versions/:timestamp/files/:fileType', async (req, res) => {
+  try {
+    const { documentId, timestamp, fileType } = req.params;
+
+    // List files in S3
+    const command = new ListObjectsV2Command({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Prefix: `${documentId}/${timestamp}/${fileType}/`
+    });
+
+    const response = await s3Client.send(command);
+    
+    const files = response.Contents?.map(file => ({
+      name: file.Key.split('/').pop(),
+      size: file.Size,
+      lastModified: file.LastModified
+    })) || [];
+
+    res.json({
+      success: true,
+      files
+    });
+  } catch (error) {
+    console.error('Error listing files:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to list files',
+      message: error.message
+    });
+  }
+});
+
+// Nested routes for user activity
+app.get('/api/:documentId/versions/:timestamp/users/:userId/activity', async (req, res) => {
+  try {
+    const { documentId, timestamp, userId } = req.params;
+
+    // Get document
+    const getCommand = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: {
+        Documentid: documentId
+      }
+    });
+
+    const doc = await docClient.send(getCommand);
+    const version = doc.Item?.versions?.[timestamp];
+    const user = doc.Item?.users?.[userId];
+
+    if (!version || !user) {
+      return res.status(404).json({
+        success: false,
+        message: "Version or user not found"
+      });
+    }
+
+    // Get user's activity in this version
+    const activity = {
+      userId,
+      nickname: user,
+      versionTimestamp: timestamp,
+      versionTitle: version.title,
+      versionDescription: version.description,
+      // Add more activity details as needed
+    };
+
+    res.json({
+      success: true,
+      activity
+    });
+  } catch (error) {
+    console.error('Error getting user activity:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get user activity',
+      message: error.message
+    });
+  }
 });
 
 // Handle all other routes
