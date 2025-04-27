@@ -231,6 +231,39 @@ app.get('/api/:documentId', async (req, res) => {
   }
 });
 
+// Get only versions for a specific document
+app.get('/api/:documentId/versions', async (req, res) => {
+  try {
+    const command = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: {
+        Documentid: req.params.documentId
+      }
+    });
+
+    const response = await docClient.send(command);
+    
+    if (!response.Item) {
+      return res.json({
+        success: false,
+        message: "No document found"
+      });
+    }
+
+    res.json({
+      success: true,
+      versions: response.Item.versions || {}
+    });
+  } catch (error) {
+    console.error('Error getting versions:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get versions',
+      message: error.message
+    });
+  }
+});
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.status(200).json({
