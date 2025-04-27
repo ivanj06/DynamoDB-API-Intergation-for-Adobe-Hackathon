@@ -266,40 +266,30 @@ app.get('/api/:documentId/versions', async (req, res) => {
   }
 });
 
-// Add a new version to a document
+// Add a new version to a document (with optional nodes)
 app.post('/api/:documentId/versions', async (req, res) => {
   try {
-    const { title, username, userid, description, timestamp } = req.body;
-    
-    // Validate required fields
+    const { title, username, userid, description, timestamp, nodes } = req.body;
     if (!title || !username || !userid || !timestamp) {
       return res.status(400).json({
         success: false,
         message: "Title, username, userid, and timestamp are required"
       });
     }
-
-    // First get the existing document
     const getCommand = new GetCommand({
       TableName: process.env.DYNAMODB_TABLE_NAME,
-      Key: {
-        Documentid: req.params.documentId
-      }
+      Key: { Documentid: req.params.documentId }
     });
-
     const existingDoc = await docClient.send(getCommand);
     const currentUsers = existingDoc.Item?.users || {};
     const currentVersions = existingDoc.Item?.versions || {};
-
-    // Create new version object
     const newVersion = {
       title,
       username,
       userid,
-      description: description || ""
+      description: description || "",
+      nodes: nodes || {}
     };
-
-    // Update document with new version
     const putCommand = new PutCommand({
       TableName: process.env.DYNAMODB_TABLE_NAME,
       Item: {
@@ -311,9 +301,7 @@ app.post('/api/:documentId/versions', async (req, res) => {
         }
       }
     });
-
     await docClient.send(putCommand);
-    
     res.status(201).json({
       success: true,
       message: "Version added successfully",
@@ -325,6 +313,89 @@ app.post('/api/:documentId/versions', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to add version',
+      message: error.message
+    });
+  }
+});
+
+// Add or update a node in a version
+app.post('/api/:documentId/versions/:timestamp/nodes/:nodeId', async (req, res) => {
+  try {
+    const { documentId, timestamp, nodeId } = req.params;
+    const { x, y, rotation } = req.body;
+    if (!Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(rotation)) {
+      return res.status(400).json({
+        success: false,
+        message: "x, y, and rotation must be integers"
+      });
+    }
+    const getCommand = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: { Documentid: documentId }
+    });
+    const doc = await docClient.send(getCommand);
+    if (!doc.Item || !doc.Item.versions || !doc.Item.versions[timestamp]) {
+      return res.status(404).json({
+        success: false,
+        message: "Version not found"
+      });
+    }
+    const version = doc.Item.versions[timestamp];
+    version.nodes = version.nodes || {};
+    version.nodes[nodeId] = { x, y, rotation };
+    const putCommand = new PutCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Item: {
+        Documentid: documentId,
+        users: doc.Item.users || {},
+        versions: {
+          ...doc.Item.versions,
+          [timestamp]: version
+        }
+      }
+    });
+    await docClient.send(putCommand);
+    res.json({
+      success: true,
+      message: "Node added/updated successfully",
+      node: { x, y, rotation },
+      nodeId
+    });
+  } catch (error) {
+    console.error('Error adding/updating node:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to add/update node',
+      message: error.message
+    });
+  }
+});
+
+// Get all nodes for a version
+app.get('/api/:documentId/versions/:timestamp/nodes', async (req, res) => {
+  try {
+    const { documentId, timestamp } = req.params;
+    const getCommand = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: { Documentid: documentId }
+    });
+    const doc = await docClient.send(getCommand);
+    if (!doc.Item || !doc.Item.versions || !doc.Item.versions[timestamp]) {
+      return res.status(404).json({
+        success: false,
+        message: "Version not found"
+      });
+    }
+    const nodes = doc.Item.versions[timestamp].nodes || {};
+    res.json({
+      success: true,
+      nodes
+    });
+  } catch (error) {
+    console.error('Error getting nodes:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get nodes',
       message: error.message
     });
   }
@@ -613,6 +684,205 @@ app.get('/api/:documentId/versions/:timestamp/users/:userId/activity', async (re
       error: 'Failed to get user activity',
       message: error.message
     });
+  }
+});
+
+// 1. Create a node with a string ID (default x, y, rotation = 0)
+app.post('/api/:documentId/versions/:timestamp/nodes/:nodeId/create', async (req, res) => {
+  try {
+    const { documentId, timestamp, nodeId } = req.params;
+    const getCommand = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: { Documentid: documentId }
+    });
+    const doc = await docClient.send(getCommand);
+    if (!doc.Item || !doc.Item.versions || !doc.Item.versions[timestamp]) {
+      return res.status(404).json({ success: false, message: "Version not found" });
+    }
+    const version = doc.Item.versions[timestamp];
+    version.nodes = version.nodes || {};
+    version.nodes[nodeId] = { x: 0, y: 0, rotation: 0 };
+    const putCommand = new PutCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Item: {
+        Documentid: documentId,
+        users: doc.Item.users || {},
+        versions: {
+          ...doc.Item.versions,
+          [timestamp]: version
+        }
+      }
+    });
+    await docClient.send(putCommand);
+    res.json({ success: true, message: "Node created with default values", nodeId });
+  } catch (error) {
+    console.error('Error creating node:', error);
+    res.status(500).json({ success: false, error: 'Failed to create node', message: error.message });
+  }
+});
+
+// 2. Update x and y coordinates for a node
+app.post('/api/:documentId/versions/:timestamp/nodes/:nodeId/xy', async (req, res) => {
+  try {
+    const { documentId, timestamp, nodeId } = req.params;
+    const { x, y } = req.body;
+    if (!Number.isInteger(x) || !Number.isInteger(y)) {
+      return res.status(400).json({ success: false, message: "x and y must be integers" });
+    }
+    const getCommand = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: { Documentid: documentId }
+    });
+    const doc = await docClient.send(getCommand);
+    if (!doc.Item || !doc.Item.versions || !doc.Item.versions[timestamp]) {
+      return res.status(404).json({ success: false, message: "Version not found" });
+    }
+    const version = doc.Item.versions[timestamp];
+    version.nodes = version.nodes || {};
+    if (!version.nodes[nodeId]) {
+      return res.status(404).json({ success: false, message: "Node not found" });
+    }
+    version.nodes[nodeId].x = x;
+    version.nodes[nodeId].y = y;
+    const putCommand = new PutCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Item: {
+        Documentid: documentId,
+        users: doc.Item.users || {},
+        versions: {
+          ...doc.Item.versions,
+          [timestamp]: version
+        }
+      }
+    });
+    await docClient.send(putCommand);
+    res.json({ success: true, message: "Node x and y updated", nodeId, x, y });
+  } catch (error) {
+    console.error('Error updating node x/y:', error);
+    res.status(500).json({ success: false, error: 'Failed to update node x/y', message: error.message });
+  }
+});
+
+// 3. Update rotation for a node
+app.post('/api/:documentId/versions/:timestamp/nodes/:nodeId/rotation', async (req, res) => {
+  try {
+    const { documentId, timestamp, nodeId } = req.params;
+    const { rotation } = req.body;
+    if (!Number.isInteger(rotation)) {
+      return res.status(400).json({ success: false, message: "rotation must be an integer" });
+    }
+    const getCommand = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: { Documentid: documentId }
+    });
+    const doc = await docClient.send(getCommand);
+    if (!doc.Item || !doc.Item.versions || !doc.Item.versions[timestamp]) {
+      return res.status(404).json({ success: false, message: "Version not found" });
+    }
+    const version = doc.Item.versions[timestamp];
+    version.nodes = version.nodes || {};
+    if (!version.nodes[nodeId]) {
+      return res.status(404).json({ success: false, message: "Node not found" });
+    }
+    version.nodes[nodeId].rotation = rotation;
+    const putCommand = new PutCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Item: {
+        Documentid: documentId,
+        users: doc.Item.users || {},
+        versions: {
+          ...doc.Item.versions,
+          [timestamp]: version
+        }
+      }
+    });
+    await docClient.send(putCommand);
+    res.json({ success: true, message: "Node rotation updated", nodeId, rotation });
+  } catch (error) {
+    console.error('Error updating node rotation:', error);
+    res.status(500).json({ success: false, error: 'Failed to update node rotation', message: error.message });
+  }
+});
+
+// Update only the x coordinate for a node
+app.post('/api/:documentId/versions/:timestamp/nodes/:nodeId/x', async (req, res) => {
+  try {
+    const { documentId, timestamp, nodeId } = req.params;
+    const { x } = req.body;
+    if (!Number.isInteger(x)) {
+      return res.status(400).json({ success: false, message: "x must be an integer" });
+    }
+    const getCommand = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: { Documentid: documentId }
+    });
+    const doc = await docClient.send(getCommand);
+    if (!doc.Item || !doc.Item.versions || !doc.Item.versions[timestamp]) {
+      return res.status(404).json({ success: false, message: "Version not found" });
+    }
+    const version = doc.Item.versions[timestamp];
+    version.nodes = version.nodes || {};
+    if (!version.nodes[nodeId]) {
+      return res.status(404).json({ success: false, message: "Node not found" });
+    }
+    version.nodes[nodeId].x = x;
+    const putCommand = new PutCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Item: {
+        Documentid: documentId,
+        users: doc.Item.users || {},
+        versions: {
+          ...doc.Item.versions,
+          [timestamp]: version
+        }
+      }
+    });
+    await docClient.send(putCommand);
+    res.json({ success: true, message: "Node x updated", nodeId, x });
+  } catch (error) {
+    console.error('Error updating node x:', error);
+    res.status(500).json({ success: false, error: 'Failed to update node x', message: error.message });
+  }
+});
+
+// Update only the y coordinate for a node
+app.post('/api/:documentId/versions/:timestamp/nodes/:nodeId/y', async (req, res) => {
+  try {
+    const { documentId, timestamp, nodeId } = req.params;
+    const { y } = req.body;
+    if (!Number.isInteger(y)) {
+      return res.status(400).json({ success: false, message: "y must be an integer" });
+    }
+    const getCommand = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: { Documentid: documentId }
+    });
+    const doc = await docClient.send(getCommand);
+    if (!doc.Item || !doc.Item.versions || !doc.Item.versions[timestamp]) {
+      return res.status(404).json({ success: false, message: "Version not found" });
+    }
+    const version = doc.Item.versions[timestamp];
+    version.nodes = version.nodes || {};
+    if (!version.nodes[nodeId]) {
+      return res.status(404).json({ success: false, message: "Node not found" });
+    }
+    version.nodes[nodeId].y = y;
+    const putCommand = new PutCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Item: {
+        Documentid: documentId,
+        users: doc.Item.users || {},
+        versions: {
+          ...doc.Item.versions,
+          [timestamp]: version
+        }
+      }
+    });
+    await docClient.send(putCommand);
+    res.json({ success: true, message: "Node y updated", nodeId, y });
+  } catch (error) {
+    console.error('Error updating node y:', error);
+    res.status(500).json({ success: false, error: 'Failed to update node y', message: error.message });
   }
 });
 
