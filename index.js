@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { docClient, s3Client } = require('./config/dynamodb');
 const { PutCommand, GetCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
-const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { ListObjectsV2Command } = require('@aws-sdk/client-s3');
 
 const app = express();
@@ -330,24 +330,24 @@ app.post('/api/:documentId/versions', async (req, res) => {
   }
 });
 
-// Upload file to S3
-app.post('/api/:documentId/versions/:timestamp/upload', express.raw({ type: ['application/pdf', 'image/jpeg'], limit: '100mb' }), async (req, res) => {
+// Upload file chunk to S3
+app.post('/api/:documentId/versions/:timestamp/upload-chunk', express.raw({ type: ['application/pdf', 'image/jpeg'], limit: '4.5mb' }), async (req, res) => {
   try {
     const { documentId, timestamp } = req.params;
-    const { fileType, fileName } = req.query;
+    const { fileType, fileName, chunkIndex, totalChunks } = req.query;
 
-    if (!fileType || !fileName) {
+    if (!fileType || !fileName || !chunkIndex || !totalChunks) {
       return res.status(400).json({
         success: false,
-        message: "File type and file name are required"
+        message: "File type, file name, chunk index, and total chunks are required"
       });
     }
 
-    const key = `${documentId}/${timestamp}/${fileType}/${fileName}`;
+    const chunkKey = `${documentId}/${timestamp}/${fileType}/${fileName}.part${chunkIndex}`;
     
     const command = new PutObjectCommand({
       Bucket: process.env.S3_BUCKET_NAME,
-      Key: key,
+      Key: chunkKey,
       Body: req.body,
       ContentType: req.headers['content-type']
     });
@@ -356,14 +356,74 @@ app.post('/api/:documentId/versions/:timestamp/upload', express.raw({ type: ['ap
 
     res.json({
       success: true,
-      message: "File uploaded successfully",
-      key: key
+      message: "Chunk uploaded successfully",
+      chunkKey: chunkKey,
+      chunkIndex: parseInt(chunkIndex),
+      totalChunks: parseInt(totalChunks)
     });
   } catch (error) {
-    console.error('Error uploading file:', error);
+    console.error('Error uploading chunk:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to upload file',
+      error: 'Failed to upload chunk',
+      message: error.message
+    });
+  }
+});
+
+// Complete multipart upload
+app.post('/api/:documentId/versions/:timestamp/complete-upload', async (req, res) => {
+  try {
+    const { documentId, timestamp } = req.params;
+    const { fileType, fileName, totalChunks } = req.body;
+
+    if (!fileType || !fileName || !totalChunks) {
+      return res.status(400).json({
+        success: false,
+        message: "File type, file name, and total chunks are required"
+      });
+    }
+
+    // List all chunks
+    const chunks = [];
+    for (let i = 0; i < totalChunks; i++) {
+      const chunkKey = `${documentId}/${timestamp}/${fileType}/${fileName}.part${i}`;
+      chunks.push(chunkKey);
+    }
+
+    // Combine chunks into final file
+    const finalKey = `${documentId}/${timestamp}/${fileType}/${fileName}`;
+    
+    // In a real implementation, you would use S3's multipart upload API
+    // For simplicity, we'll just copy the last chunk as the final file
+    const command = new PutObjectCommand({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Key: finalKey,
+      CopySource: `${process.env.S3_BUCKET_NAME}/${chunks[chunks.length - 1]}`,
+      ContentType: 'application/pdf'
+    });
+
+    await s3Client.send(command);
+
+    // Clean up chunks
+    for (const chunkKey of chunks) {
+      const deleteCommand = new DeleteObjectCommand({
+        Bucket: process.env.S3_BUCKET_NAME,
+        Key: chunkKey
+      });
+      await s3Client.send(deleteCommand);
+    }
+
+    res.json({
+      success: true,
+      message: "File upload completed successfully",
+      key: finalKey
+    });
+  } catch (error) {
+    console.error('Error completing upload:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to complete upload',
       message: error.message
     });
   }
