@@ -1,9 +1,13 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const { docClient } = require('./config/dynamodb');
 const { PutCommand, GetCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
 
 const app = express();
+
+// Enable CORS for all routes
+app.use(cors());
 
 // Enable JSON parsing
 app.use(express.json());
