@@ -479,7 +479,7 @@ app.get('/api/:documentId/versions/:timestamp/download', async (req, res) => {
 });
 
 // Get all JPEG images for a version
-app.get('/api/:documentId/versions/:timestamp/images', async (req, res) => {
+app.get('/api/:documentId/:timestamp/images', async (req, res) => {
   try {
     const { documentId, timestamp } = req.params;
     
