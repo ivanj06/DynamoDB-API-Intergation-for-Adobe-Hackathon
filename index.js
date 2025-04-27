@@ -409,45 +409,59 @@ app.get('/api/:documentId/versions/:timestamp/download', async (req, res) => {
   }
 });
 
-// Delete a version and its files
+// Delete a version from DynamoDB
 app.delete('/api/:documentId/versions/:timestamp', async (req, res) => {
   try {
     const { documentId, timestamp } = req.params;
 
-    // First, list all objects in the version directory
-    const listCommand = new ListObjectsV2Command({
-      Bucket: process.env.S3_BUCKET_NAME,
-      Prefix: `${documentId}/${timestamp}/`
-    });
-
-    const listResponse = await s3Client.send(listCommand);
-    
-    if (!listResponse.Contents || listResponse.Contents.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No files found for this version"
-      });
-    }
-
-    // Prepare objects to delete
-    const objectsToDelete = listResponse.Contents.map(obj => ({
-      Key: obj.Key
-    }));
-
-    // Delete all objects
-    const deleteCommand = new DeleteObjectsCommand({
-      Bucket: process.env.S3_BUCKET_NAME,
-      Delete: {
-        Objects: objectsToDelete
+    // First get the existing document
+    const getCommand = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: {
+        Documentid: documentId
       }
     });
 
-    await s3Client.send(deleteCommand);
+    const existingDoc = await docClient.send(getCommand);
+    
+    if (!existingDoc.Item) {
+      return res.status(404).json({
+        success: false,
+        message: "Document not found"
+      });
+    }
+
+    const currentVersions = existingDoc.Item.versions || {};
+    const currentUsers = existingDoc.Item.users || {};
+
+    // Check if version exists
+    if (!currentVersions[timestamp]) {
+      return res.status(404).json({
+        success: false,
+        message: "Version not found"
+      });
+    }
+
+    // Remove the version
+    delete currentVersions[timestamp];
+
+    // Update the document
+    const putCommand = new PutCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Item: {
+        Documentid: documentId,
+        users: currentUsers,
+        versions: currentVersions
+      }
+    });
+
+    await docClient.send(putCommand);
 
     res.json({
       success: true,
-      message: "Version and all associated files deleted successfully",
-      deletedFiles: objectsToDelete.length
+      message: "Version deleted successfully",
+      documentId: documentId,
+      timestamp: timestamp
     });
   } catch (error) {
     console.error('Error deleting version:', error);
