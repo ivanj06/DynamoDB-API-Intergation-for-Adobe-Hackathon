@@ -264,6 +264,73 @@ app.get('/api/:documentId/versions', async (req, res) => {
   }
 });
 
+// Add a new version to a document
+app.post('/api/:documentId/versions', async (req, res) => {
+  try {
+    const { title, username, userid, description } = req.body;
+    
+    // Validate required fields
+    if (!title || !username || !userid) {
+      return res.status(400).json({
+        success: false,
+        message: "Title, username, and userid are required"
+      });
+    }
+
+    // First get the existing document
+    const getCommand = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: {
+        Documentid: req.params.documentId
+      }
+    });
+
+    const existingDoc = await docClient.send(getCommand);
+    const currentUsers = existingDoc.Item?.users || {};
+    const currentVersions = existingDoc.Item?.versions || {};
+
+    // Generate Unix timestamp for the version key
+    const timestamp = Math.floor(Date.now() / 1000);
+
+    // Create new version object
+    const newVersion = {
+      title,
+      username,
+      userid,
+      description: description || ""
+    };
+
+    // Update document with new version
+    const putCommand = new PutCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Item: {
+        Documentid: req.params.documentId,
+        users: currentUsers,
+        versions: {
+          ...currentVersions,
+          [timestamp]: newVersion
+        }
+      }
+    });
+
+    await docClient.send(putCommand);
+    
+    res.status(201).json({
+      success: true,
+      message: "Version added successfully",
+      version: newVersion,
+      timestamp: timestamp
+    });
+  } catch (error) {
+    console.error('Error adding version:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to add version',
+      message: error.message
+    });
+  }
+});
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.status(200).json({
