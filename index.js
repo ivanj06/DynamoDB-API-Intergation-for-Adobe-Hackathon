@@ -478,6 +478,54 @@ app.get('/api/:documentId/versions/:timestamp/download', async (req, res) => {
   }
 });
 
+// Get all JPEG images for a version
+app.get('/api/:documentId/versions/:timestamp/images', async (req, res) => {
+  try {
+    const { documentId, timestamp } = req.params;
+    
+    // List all JPEG files in the images folder for this version
+    const command = new ListObjectsV2Command({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Prefix: `${documentId}/${timestamp}/images/`,
+      // Filter for JPEG files
+      Filter: {
+        Suffix: '.jpeg'
+      }
+    });
+
+    const response = await s3Client.send(command);
+    
+    if (!response.Contents || response.Contents.length === 0) {
+      return res.json({
+        success: true,
+        message: "No images found",
+        images: []
+      });
+    }
+
+    // Map the S3 objects to image URLs
+    const images = response.Contents.map(file => ({
+      name: file.Key.split('/').pop(),
+      size: file.Size,
+      lastModified: file.LastModified,
+      url: `https://${process.env.S3_BUCKET_NAME}.s3.amazonaws.com/${file.Key}`
+    }));
+
+    res.json({
+      success: true,
+      message: "Images retrieved successfully",
+      images
+    });
+  } catch (error) {
+    console.error('Error getting images:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get images',
+      message: error.message
+    });
+  }
+});
+
 // Delete a version from DynamoDB (but keep S3 files)
 app.delete('/api/:documentId/versions/:timestamp', async (req, res) => {
   try {
