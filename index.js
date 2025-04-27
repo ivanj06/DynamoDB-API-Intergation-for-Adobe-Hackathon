@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { docClient, s3Client } = require('./config/dynamodb');
 const { PutCommand, GetCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
-const { PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { PutObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } = require('@aws-sdk/client-s3');
 
 const app = express();
 
@@ -404,6 +404,103 @@ app.get('/api/:documentId/versions/:timestamp/download', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to download file',
+      message: error.message
+    });
+  }
+});
+
+// Delete all files for a document version and remove the version from DynamoDB
+app.delete('/api/:documentId/versions/:timestamp', async (req, res) => {
+  try {
+    const { documentId, timestamp } = req.params;
+    
+    // First, get the current document to update its versions
+    const getCommand = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: {
+        Documentid: documentId
+      }
+    });
+
+    const existingDoc = await docClient.send(getCommand);
+    
+    if (!existingDoc.Item) {
+      return res.status(404).json({
+        success: false,
+        message: "Document not found"
+      });
+    }
+
+    const currentUsers = existingDoc.Item.users || {};
+    const currentVersions = existingDoc.Item.versions || {};
+
+    // Remove the specific version from the versions object
+    const { [timestamp]: removedVersion, ...remainingVersions } = currentVersions;
+
+    // Update the document in DynamoDB
+    const updateCommand = new PutCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Item: {
+        Documentid: documentId,
+        users: currentUsers,
+        versions: remainingVersions
+      }
+    });
+
+    await docClient.send(updateCommand);
+    
+    // Now delete files from S3
+    const prefixes = [
+      `${documentId}/${timestamp}/pdf/`,
+      `${documentId}/${timestamp}/images/`
+    ];
+
+    let deletedCount = 0;
+    let errorCount = 0;
+
+    // Process each prefix (pdf and images folders)
+    for (const prefix of prefixes) {
+      // List all objects with this prefix
+      const listCommand = new ListObjectsV2Command({
+        Bucket: process.env.S3_BUCKET_NAME,
+        Prefix: prefix
+      });
+
+      const listResponse = await s3Client.send(listCommand);
+      
+      if (listResponse.Contents && listResponse.Contents.length > 0) {
+        // Prepare objects for deletion
+        const objectsToDelete = listResponse.Contents.map(item => ({
+          Key: item.Key
+        }));
+
+        // Delete the objects
+        const deleteCommand = new DeleteObjectsCommand({
+          Bucket: process.env.S3_BUCKET_NAME,
+          Delete: {
+            Objects: objectsToDelete
+          }
+        });
+
+        try {
+          await s3Client.send(deleteCommand);
+          deletedCount += objectsToDelete.length;
+        } catch (error) {
+          console.error(`Error deleting objects with prefix ${prefix}:`, error);
+          errorCount += objectsToDelete.length;
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: "Version deleted successfully"
+    });
+  } catch (error) {
+    console.error('Error deleting version:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete version',
       message: error.message
     });
   }
