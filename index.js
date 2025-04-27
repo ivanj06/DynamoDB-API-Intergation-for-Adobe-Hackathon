@@ -89,6 +89,47 @@ app.get('/api/documents', async (req, res) => {
   }
 });
 
+// Check nickname endpoint
+app.get('/api/documents/documentid/:userId', async (req, res) => {
+  try {
+    const command = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: {
+        Documentid: req.params.userId
+      }
+    });
+
+    const response = await docClient.send(command);
+    
+    if (!response.Item) {
+      return res.json({
+        success: false,
+        message: "Nickname doesn't exist"
+      });
+    }
+
+    // Check if the document has a nickname field and it's a string
+    if (response.Item.nickname && typeof response.Item.nickname === 'string') {
+      res.json({
+        success: true,
+        exists: true
+      });
+    } else {
+      res.json({
+        success: false,
+        message: "Nickname doesn't exist"
+      });
+    }
+  } catch (error) {
+    console.error('Error checking nickname:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to check nickname',
+      message: error.message
+    });
+  }
+});
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.status(200).json({
