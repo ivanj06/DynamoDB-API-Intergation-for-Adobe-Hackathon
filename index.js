@@ -95,7 +95,7 @@ app.get('/api/:documentId/:userId', async (req, res) => {
     const command = new GetCommand({
       TableName: process.env.DYNAMODB_TABLE_NAME,
       Key: {
-        Documentid: req.params.userId
+        Documentid: req.params.documentId
       }
     });
 
@@ -108,16 +108,17 @@ app.get('/api/:documentId/:userId', async (req, res) => {
       });
     }
 
-    // If nickname exists, return it
-    if (response.Item.nickname) {
+    // Check if user exists in the users object
+    const users = response.Item.users || {};
+    if (users[req.params.userId]) {
       res.json({
         success: true,
-        nickname: response.Item.nickname
+        nickname: users[req.params.userId]
       });
     } else {
       res.json({
         success: false,
-        message: "No nickname found"
+        message: "No nickname found for this user"
       });
     }
   } catch (error) {
@@ -146,27 +147,32 @@ app.post('/api/:documentId/:userId', async (req, res) => {
     const getCommand = new GetCommand({
       TableName: process.env.DYNAMODB_TABLE_NAME,
       Key: {
-        Documentid: req.params.userId
+        Documentid: req.params.documentId
       }
     });
 
     const existingDoc = await docClient.send(getCommand);
+    const currentUsers = existingDoc.Item?.users || {};
+    const currentVersions = existingDoc.Item?.versions || {};
 
-    // If document exists and has a nickname, don't allow update
-    if (existingDoc.Item && existingDoc.Item.nickname) {
+    // If user already has a nickname, don't allow update
+    if (currentUsers[req.params.userId]) {
       return res.status(400).json({
         success: false,
         message: "Nickname already exists for this user"
       });
     }
 
-    // Create or update document with nickname
+    // Create or update document with new user nickname
     const putCommand = new PutCommand({
       TableName: process.env.DYNAMODB_TABLE_NAME,
       Item: {
-        Documentid: req.params.userId,
-        nickname: nickname,
-        ...(existingDoc.Item || {}) // Preserve other fields if document exists
+        Documentid: req.params.documentId,
+        users: {
+          ...currentUsers,
+          [req.params.userId]: nickname
+        },
+        versions: currentVersions
       }
     });
 
@@ -182,6 +188,40 @@ app.post('/api/:documentId/:userId', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to set nickname',
+      message: error.message
+    });
+  }
+});
+
+// Get all users in a document
+app.get('/api/:documentId', async (req, res) => {
+  try {
+    const command = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: {
+        Documentid: req.params.documentId
+      }
+    });
+
+    const response = await docClient.send(command);
+    
+    if (!response.Item) {
+      return res.json({
+        success: false,
+        message: "No document found"
+      });
+    }
+
+    res.json({
+      success: true,
+      users: response.Item.users || {},
+      versions: response.Item.versions || {}
+    });
+  } catch (error) {
+    console.error('Error getting document:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get document',
       message: error.message
     });
   }
