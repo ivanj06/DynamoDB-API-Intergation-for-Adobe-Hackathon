@@ -89,8 +89,8 @@ app.get('/api/documents', async (req, res) => {
   }
 });
 
-// Check nickname endpoint
-app.get('/api/documents/documentid/:userId', async (req, res) => {
+// Get or check nickname endpoint
+app.get('/api/:documentId/:userId', async (req, res) => {
   try {
     const command = new GetCommand({
       TableName: process.env.DYNAMODB_TABLE_NAME,
@@ -104,20 +104,20 @@ app.get('/api/documents/documentid/:userId', async (req, res) => {
     if (!response.Item) {
       return res.json({
         success: false,
-        message: "Nickname doesn't exist"
+        message: "No document found"
       });
     }
 
-    // Check if the document has a nickname field and it's a string
-    if (response.Item.nickname && typeof response.Item.nickname === 'string') {
+    // If nickname exists, return it
+    if (response.Item.nickname) {
       res.json({
         success: true,
-        exists: true
+        nickname: response.Item.nickname
       });
     } else {
       res.json({
         success: false,
-        message: "Nickname doesn't exist"
+        message: "No nickname found"
       });
     }
   } catch (error) {
@@ -125,6 +125,63 @@ app.get('/api/documents/documentid/:userId', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to check nickname',
+      message: error.message
+    });
+  }
+});
+
+// Set nickname endpoint
+app.post('/api/:documentId/:userId', async (req, res) => {
+  try {
+    const { nickname } = req.body;
+    
+    if (!nickname) {
+      return res.status(400).json({
+        success: false,
+        message: "Nickname is required"
+      });
+    }
+
+    // First check if document exists
+    const getCommand = new GetCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Key: {
+        Documentid: req.params.userId
+      }
+    });
+
+    const existingDoc = await docClient.send(getCommand);
+
+    // If document exists and has a nickname, don't allow update
+    if (existingDoc.Item && existingDoc.Item.nickname) {
+      return res.status(400).json({
+        success: false,
+        message: "Nickname already exists for this user"
+      });
+    }
+
+    // Create or update document with nickname
+    const putCommand = new PutCommand({
+      TableName: process.env.DYNAMODB_TABLE_NAME,
+      Item: {
+        Documentid: req.params.userId,
+        nickname: nickname,
+        ...(existingDoc.Item || {}) // Preserve other fields if document exists
+      }
+    });
+
+    await docClient.send(putCommand);
+    
+    res.json({
+      success: true,
+      message: "Nickname set successfully",
+      nickname: nickname
+    });
+  } catch (error) {
+    console.error('Error setting nickname:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to set nickname',
       message: error.message
     });
   }
