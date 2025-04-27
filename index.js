@@ -90,7 +90,7 @@ app.get('/api/documents', async (req, res) => {
 });
 
 // Get or check nickname endpoint
-app.get('/api/:documentId/:userId', async (req, res) => {
+app.get('/api/:documentId/users/:userId', async (req, res) => {
   try {
     const command = new GetCommand({
       TableName: process.env.DYNAMODB_TABLE_NAME,
@@ -132,7 +132,7 @@ app.get('/api/:documentId/:userId', async (req, res) => {
 });
 
 // Set nickname endpoint
-app.post('/api/:documentId/:userId', async (req, res) => {
+app.post('/api/:documentId/users/:userId', async (req, res) => {
   try {
     const { nickname } = req.body;
     
